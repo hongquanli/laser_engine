@@ -890,6 +890,11 @@ void queryTCMDataMainLoop() {
  */
 void analyzingHostFrame() {
 	if (Serial.available()) {
+		if (host_protocol_buf_length >= sizeof(host_protocol_buf)) {
+			Serial.read(); // drain the byte
+			host_protocol_buf_length = 0;
+			return;
+		}
 		host_protocol_buf[host_protocol_buf_length++] = Serial.read();
 		if (host_protocol_buf[host_protocol_buf_length - 1] == 0x0D &&
 				host_protocol_buf[host_protocol_buf_length - 2] == 0x0A) {
@@ -961,6 +966,12 @@ uint8_t tcmParseAndStore(float* targetArray) {
 void analyzingTCMFrame() {
 	if (reply_frame_analyzing_flag) {
 		if (Serial5.available()) {
+			if (tcm_reply_buf_length >= sizeof(tcm_reply_buf)) {
+				Serial5.read(); // drain
+				tcm_reply_buf_length = 0;
+				reply_frame_analyzing_flag = false;
+				return;
+			}
 			tcm_reply_buf[tcm_reply_buf_length++] = Serial5.read();
 			// read the end flag of frame
 			if (tcm_reply_buf[tcm_reply_buf_length - 1] == 0x0D) {
