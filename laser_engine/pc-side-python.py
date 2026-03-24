@@ -99,7 +99,7 @@ class TeensyController:
                 tec_voltage = struct.unpack('>h', temp_data[offset + 3:offset + 5])[0] / 100.0
                 tec_current = struct.unpack('>h', temp_data[offset + 5:offset + 7])[0] / 100.0
 
-                state_str = STATE_NAMES[state]
+                state_str = STATE_NAMES[state] if state < len(STATE_NAMES) else f"UNKNOWN({state})"
                 self.log_message(f"Channel {i}: State: {state_str}, Temp: {temp:.2f}°C, TEC Voltage: {tec_voltage:.2f}, TEC Current: {tec_current:.2f}")
 
             diff_temp_offset = NUM_TEMP_CH * BYTES_PER_CHANNEL
