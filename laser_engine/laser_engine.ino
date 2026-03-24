@@ -735,6 +735,10 @@ void onPacketReceived(const uint8_t* buffer, size_t size) {
     case 'S': // Put one channel to sleep
       {
         uint32_t channel = readChannelFromBuffer(buffer);
+        if (channel > NUM_LASER_CHANNELS) {
+          sendNAK();
+          break;
+        }
         if (channel == 4) {
           doSleepAction(4);
           doSleepAction(5);
@@ -746,6 +750,10 @@ void onPacketReceived(const uint8_t* buffer, size_t size) {
     case 'W': // Wake up channel
       {
         uint32_t channel = readChannelFromBuffer(buffer);
+        if (channel > NUM_LASER_CHANNELS) {
+          sendNAK();
+          break;
+        }
         if (channel == 4) {
           doWakeupAction(4);
           doWakeupAction(5);
@@ -757,6 +765,10 @@ void onPacketReceived(const uint8_t* buffer, size_t size) {
     case 'G': // Query channel status
       {
         uint32_t channel = readChannelFromBuffer(buffer);
+        if (channel >= NUM_LASER_CHANNELS) {
+          sendNAK();
+          break;
+        }
         sendChannelStatus(channel);
       }
       break;
