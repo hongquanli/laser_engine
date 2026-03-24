@@ -391,6 +391,8 @@ void getAddressModuleFromChannel(uint8_t channel, uint8_t* address, uint8_t* mod
 /*
 	Prepare TCM reply state for the next expected response.
 	Called after sending a command to Serial5.
+	If replyTitle is NULL, the caller must have already set tcm_reply_title
+	via sprintf before calling this function.
  */
 void tcmPrepareReply(const char* replyTitle, uint8_t address, uint8_t module_index, CommandType cmdType) {
 	if (replyTitle != NULL) {
@@ -702,6 +704,10 @@ void sendChannelStatus(uint32_t channel) {
   uploadData(finalPacket, sizeof(finalPacket));
 }
 
+/*
+	Read a 4-byte little-endian channel number from buffer[1..4].
+	Caller must ensure buffer has at least 5 bytes (1 command byte + 4 data bytes).
+ */
 uint32_t readChannelFromBuffer(const uint8_t* buffer) {
   return uint32_t(buffer[1]) | (uint32_t(buffer[2]) << 8) |
          (uint32_t(buffer[3]) << 16) | (uint32_t(buffer[4]) << 24);
