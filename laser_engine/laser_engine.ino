@@ -181,7 +181,8 @@ CommandType tcm_reply_command_type = NONE;
 uint8_t host_protocol_buf[256];
 uint8_t host_protocol_buf_length = 0;
 
-uint8_t key_status = 0; 
+uint8_t key_status = 0;
+uint16_t tcm_parse_failure_count = 0;
 
 enum LEDState {
   RED,
@@ -957,6 +958,7 @@ uint8_t tcmParseAndStore(float* targetArray) {
 		}
 		return tindex;
 	}
+	tcm_parse_failure_count++;
 	return ERR_OUT_OF_RANGE;
 }
 
