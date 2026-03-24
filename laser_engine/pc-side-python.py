@@ -127,21 +127,39 @@ class TeensyController:
 
     def query_loop(self):
         while self.running:
-            self.query_status()
+            try:
+                self.query_status()
+            except serial.SerialException as e:
+                logging.error(f"Serial error in query loop: {e}")
+                self.running = False
+                break
+            except Exception as e:
+                logging.error(f"Unexpected error in query loop: {e}")
             time.sleep(self.query_interval)
 
     def received_loop(self):
         msg = []
         while self.running:
-            if self.packet_serial.in_waiting == 0:
-                continue
+            try:
+                if self.packet_serial.in_waiting == 0:
+                    continue
 
-            char = self.packet_serial.read(1)
-            if char == b'\r' and msg and msg[-1] == 0x0A:
-                self.on_packet_received(bytearray(msg[:-1]))
+                char = self.packet_serial.read(1)
+                if char == b'\r':
+                    if msg and msg[-1] == 0x0A:
+                        self.on_packet_received(bytearray(msg[:-1]))
+                    elif msg:
+                        logging.warning(f"Discarding {len(msg)} bytes of partial packet data")
+                    msg = []
+                    continue
+                msg += char
+            except serial.SerialException as e:
+                logging.error(f"Serial error in receive loop: {e}")
+                self.running = False
+                break
+            except Exception as e:
+                logging.error(f"Error processing received data: {e}")
                 msg = []
-                continue
-            msg += char
 
     def start(self):
         self.running = True
