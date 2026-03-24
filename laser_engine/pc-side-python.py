@@ -8,19 +8,16 @@
  version:		1.0.0
 """
 
-import serial
-from serial.tools import list_ports
-
 import struct
 import time
 import threading
-import datetime
 import logging
-
-# Configure logging
-logging.basicConfig(filename='laser_engine.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
 from zlib import crc32
+
+import serial
+from serial.tools import list_ports
+
+logging.basicConfig(filename='laser_engine.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 #USBSN = '12769670'
 USBSN = None
@@ -40,10 +37,10 @@ class TeensyController:
                 if device == p.device:
                     ports.append(p.device)
         
-        if ports == []:
+        if not ports:
             raise ValueError("No device found with serial number or device")
-        else:
-            self.packet_serial = serial.Serial(ports[0], baudrate=baud_rate, timeout=1)
+
+        self.packet_serial = serial.Serial(ports[0], baudrate=baud_rate, timeout=1)
 
         self.lock = threading.RLock()
         self.query_interval = 1.0  # Query interval in seconds
@@ -51,7 +48,7 @@ class TeensyController:
         self.query_thread = None
         self.thread_read_received_packet = None
 
-        self.crc_missmatch = 0
+        self.crc_mismatch = 0
 
         self.mappings = {
             '405': 0,
@@ -78,36 +75,44 @@ class TeensyController:
         calculated_crc = crc32(packet[:-4])
 
         if received_crc != calculated_crc:
-            self.crc_missmatch += 1
+            self.crc_mismatch += 1
             print("CRC mismatch")
             return
 
         if packet[0] == ord('S'):  # Status packet
-            laser_status = packet[1:6]
-            temp_data = packet[6:-4]
-            
+            NUM_LASER_CH = 5
+            NUM_TEMP_CH = 6
+            BYTES_PER_CHANNEL = 7
+            STATE_NAMES = ["WARMING_UP", "CHECK_ACTIVE", "ACTIVE", "WAKE_UP", "SLEEP", "PREPARE_SLEEP", "CHECK_ERROR", "ERROR"]
+
+            laser_status = packet[1:1 + NUM_LASER_CH]
+            temp_data = packet[1 + NUM_LASER_CH:-4]
+
             self.log_message('')
             self.log_message('New Round Query Data Start..')
             self.log_message("Laser TTL Status:" + str([bool(x) for x in laser_status]))
-            
-            for i in range(6):
-                state = temp_data[i*7]
-                temp = struct.unpack('>h', temp_data[i*7 + 1:i*7 + 3])[0] / 100.0
-                tec_voltage = struct.unpack('>h', temp_data[i*7 + 3:i*7 + 5])[0] / 100.0
-                tec_current = struct.unpack('>h', temp_data[i*7 + 5:i*7 + 7])[0] / 100.0
-                
-                state_str = ["WARMING_UP", "CHECK_ACTIVE", "ACTIVE", "WAKE_UP", "SLEEP", "PREPARE_SLEEP", "CHECK_ERROR", "ERROR"][state]
+
+            for i in range(NUM_TEMP_CH):
+                offset = i * BYTES_PER_CHANNEL
+                state = temp_data[offset]
+                temp = struct.unpack('>h', temp_data[offset + 1:offset + 3])[0] / 100.0
+                tec_voltage = struct.unpack('>h', temp_data[offset + 3:offset + 5])[0] / 100.0
+                tec_current = struct.unpack('>h', temp_data[offset + 5:offset + 7])[0] / 100.0
+
+                state_str = STATE_NAMES[state]
                 self.log_message(f"Channel {i}: State: {state_str}, Temp: {temp:.2f}°C, TEC Voltage: {tec_voltage:.2f}, TEC Current: {tec_current:.2f}")
 
-            for i in range(6):
-                temp = struct.unpack('>h', temp_data[42 + i*2 + 0:42 + i*2 + 2])[0] / 100.0
+            diff_temp_offset = NUM_TEMP_CH * BYTES_PER_CHANNEL
+            for i in range(NUM_TEMP_CH):
+                temp = struct.unpack('>h', temp_data[diff_temp_offset + i*2:diff_temp_offset + i*2 + 2])[0] / 100.0
                 self.log_message(f"Channel {i}: DiffTemp: {temp:.2f}°C")
 
-            for i in range(6):
-                temp = struct.unpack('>h', temp_data[42 + 12 + i*2 + 0:42 + 12 + i*2 + 2])[0] / 100.0
+            hi_temp_offset = diff_temp_offset + NUM_TEMP_CH * 2
+            for i in range(NUM_TEMP_CH):
+                temp = struct.unpack('>h', temp_data[hi_temp_offset + i*2:hi_temp_offset + i*2 + 2])[0] / 100.0
                 self.log_message(f"Channel {i}: Hi-Temp SetPoint: {temp:.2f}°C")
 
-            self.log_message(f"CRC missmatch times: {self.crc_missmatch}")
+            self.log_message(f"CRC mismatch times: {self.crc_mismatch}")
         
         elif packet[0] == ord('A'):  # Acknowledgment packet
             print("Parameters set successfully")
@@ -128,12 +133,11 @@ class TeensyController:
     def received_loop(self):
         msg = []
         while self.running:
-            #msg.append(ord(self.packet_serial.read()))
             if self.packet_serial.in_waiting == 0:
                 continue
 
             char = self.packet_serial.read(1)
-            if char == b'\r' and msg[-1] == 0x0A:
+            if char == b'\r' and msg and msg[-1] == 0x0A:
                 self.on_packet_received(bytearray(msg[:-1]))
                 msg = []
                 continue
@@ -166,16 +170,19 @@ class TeensyController:
         finally:
             self.stop()
 
+    def _send_packet(self, packet):
+        '''Send a packet with CRC and terminator. Must be called with self.lock held.'''
+        checksum = crc32(packet)
+        self.packet_serial.write(packet + struct.pack('<I', checksum))
+        self.packet_serial.write(b'\x0A\x0D')
+
     def query_status(self):
         '''
         API
         query all status information from firmware
         '''
         with self.lock:
-            packet = b'Q'
-            crc = crc32(packet)
-            self.packet_serial.write(packet + struct.pack('<I', crc))
-            self.packet_serial.write(b'\x0A\x0D')
+            self._send_packet(b'Q')
 
     def wake_up(self, channel):
         '''
@@ -184,22 +191,16 @@ class TeensyController:
         channel: 405, 470, 638, 735, 55x
         '''
         with self.lock:
-            packet = b'W' + struct.pack('<I', self.mappings[channel])
-            crc = crc32(packet)
-            self.packet_serial.write(packet + struct.pack('<I', crc))
-            self.packet_serial.write(b'\x0A\x0D')
+            self._send_packet(b'W' + struct.pack('<I', self.mappings[channel]))
 
     def put_to_sleep(self, channel):
         '''
         API
-        make one channel into sleep 
+        make one channel into sleep
         channel: 405, 470, 638, 735, 55x
         '''
         with self.lock:
-            packet = b'S' + struct.pack('<I', self.mappings[channel])
-            crc = crc32(packet)
-            self.packet_serial.write(packet + struct.pack('<I', crc))
-            self.packet_serial.write(b'\x0A\x0D')
+            self._send_packet(b'S' + struct.pack('<I', self.mappings[channel]))
 
     def get_laser_status(self, channel):
         '''
@@ -208,15 +209,7 @@ class TeensyController:
         channel: 405, 470, 638, 735, 55x
         '''
         with self.lock:
-            packet = b'G' + struct.pack('<I', self.mappings[channel])
-            crc = crc32(packet)
-            self.packet_serial.write(packet + struct.pack('<I', crc))
-            self.packet_serial.write(b'\x0A\x0D')
-
-
-def crc32_to_bytes(crc32_value):
-    # Pack the CRC32 integer into bytes using little-endian format
-    return struct.pack('<I', crc32_value)
+            self._send_packet(b'G' + struct.pack('<I', self.mappings[channel]))
 
 
 if __name__ == "__main__":
@@ -225,7 +218,7 @@ if __name__ == "__main__":
     
     # Example usage in a separate thread
     def set_parameters_thread():
-        time.sleep(2)  # Wait for 5 seconds before setting parameters
+        time.sleep(2)
 
         # channel: 405, 470, 638, 735, 55x
         # controller.put_to_sleep('55x')

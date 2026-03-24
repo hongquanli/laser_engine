@@ -14,10 +14,6 @@
 #include <elapsedMillis.h>
 #include <CRC32.h>
 
-const char gtitle[] = "Lase_Engine_Firmware";
-const char gversion[] = "V1.27";
-char gtmpbuf[100];
-
 // Teensy4.1 board v2 def
 
 // RGB LED define
@@ -63,7 +59,7 @@ const unsigned long CHANNELS_SLEEP_TIMEOUT[NUM_TEMP_CHANNELS] = {
 unsigned long lastActiveTime[NUM_TEMP_CHANNELS] = {0};
 bool lastActiveTimeRecordFlag[NUM_TEMP_CHANNELS] = {false};
 
-// If due to worktime is over 8 hours, the wakeupCoolDownTime would be 10 minuts
+// If due to worktime is over 8 hours, the wakeupCoolDownTime would be 10 minutes
 // others is 1 seconds
 const unsigned long SHORT_WAKEUP_COOLDOWN_TIME = 1UL * 1000UL;
 unsigned long wakeupCoolDownTime[NUM_TEMP_CHANNELS] = {
@@ -103,7 +99,7 @@ const int8_t ERR_OUT_OF_RANGE = 100;
  *
  * PREPARE_SLEEP: (middle status) do the action before enter real SLEEP status
  * WAKE_UP: (middle status) do the action for return status from SLEEP to WARMING_UP
- * CHECK_ERROR: (middle status) before enter ERROR status, do some check for comfirming
+ * CHECK_ERROR: (middle status) before enter ERROR status, do some check for confirming
  *
  */
 enum ChannelState {
@@ -142,7 +138,7 @@ bool enableTCMReady[NUM_TEMP_CHANNELS] = {false};
 float tempCurrentPoints[NUM_TEMP_CHANNELS] = {0.6, 0.5, 0.4, 0.3, 0.2, 0.1};
 float highTempCurrentPoints[NUM_TEMP_CHANNELS] = {0.1, 0.2, 0.3, 0.4, 0.5, 0.6};
 
-// Volatge value of channels
+// Voltage value of channels
 float voltageCurrentPoints[NUM_VOLTAGE_CHANNELS] = {0.1, 0.2, 0.3, 0.4, 0.5, 0.6};
 
 // current value of channels
@@ -153,7 +149,7 @@ unsigned long lastChannelStatesChangeTime[NUM_TEMP_CHANNELS] = {0};
 
 elapsedMillis timeInErrorState[NUM_TEMP_CHANNELS] = {0};
 
-// when sttaus change, need wait sometime to confirm device status
+// when status changes, need to wait some time to confirm device status
 elapsedMillis timeStatusCheck[NUM_TEMP_CHANNELS] = {0};
 
 elapsedMillis timeSinceLastQueryTemp = 0;
@@ -239,10 +235,7 @@ void set_status_LED(LEDState status) {
 }
 
 void indicate_device_status() {
-	bool flag = false;
-
   if (config_enable_key_status_led) {
-    // if key_status is at OFF status, change the light to RED + GREEN
     if (key_status == 0) {
       set_status_LED(YELLOW);
       return;
@@ -250,28 +243,21 @@ void indicate_device_status() {
   }
 
   for (int i = 0; i < NUM_TEMP_CHANNELS; i++) {
-    if (channelStates[i] == ERROR)
-			flag = true;
-	}
-	if (flag == true) {
-		set_status_LED(RED);
-		return;
-	}
+    if (channelStates[i] == ERROR) {
+      set_status_LED(RED);
+      return;
+    }
+  }
 
-	// there is not error channel
-	// reset flag
-	flag = false;
   for (int i = 0; i < NUM_TEMP_CHANNELS; i++) {
-    if (channelStates[i] != ACTIVE)
-			flag = true;
-	}
-	if (flag == true) {
-		set_status_LED(BLUE);
-		return;
-	}
+    if (channelStates[i] != ACTIVE) {
+      set_status_LED(BLUE);
+      return;
+    }
+  }
 
-	// all channels are ACTIVE
-	set_status_LED(GREEN);
+  // all channels are ACTIVE
+  set_status_LED(GREEN);
 }
 
 void setParameters(const uint8_t* buffer, size_t size) {
@@ -403,15 +389,31 @@ void getAddressModuleFromChannel(uint8_t channel, uint8_t* address, uint8_t* mod
 }
 
 /*
+	Prepare TCM reply state for the next expected response.
+	Called after sending a command to Serial5.
+ */
+void tcmPrepareReply(const char* replyTitle, uint8_t address, uint8_t module_index, CommandType cmdType) {
+	if (replyTitle != NULL) {
+		sprintf(tcm_reply_title, "%s", replyTitle);
+	}
+	tcm_reply_title_length = strlen(tcm_reply_title);
+	tcm_reply_address = address;
+	tcm_reply_module = module_index;
+	tcm_reply_command_type = cmdType;
+	tcm_reply_buf_length = 0;
+	reply_frame_analyzing_flag = true;
+}
+
+/*
 	channel: 0~5
  */
 void tcmSwitchTCMStatusCommand(uint8_t channel_index) {
   if (channelStates[channel_index] == PREPARE_SLEEP) {
-		// TCSW=0 disable the TCM temperary controller
+		// TCSW=0 disable the TCM temperature controller
     tcmDisableEnableTCMCommand(channel_index, false);
   }
   else if (channelStates[channel_index] == WAKE_UP) {
-		// TCSW=1 enable the TCM temperary controller
+		// TCSW=1 enable the TCM temperature controller
     tcmDisableEnableTCMCommand(channel_index, true);
   }
 }
@@ -434,19 +436,7 @@ void tcmDisableEnableTCMCommand(uint8_t channel_index, bool flag) {
     sprintf(tcm_command_buf, "TC%d:TCSW=1@%d%c", module_index, address, 0x0D);
 
 	Serial5.write(tcm_command_buf, strlen(tcm_command_buf));
-
-  sprintf(tcm_reply_title, "CMD:REPLY=");
-
-	tcm_reply_title_length = strlen(tcm_reply_title);
-	tcm_reply_address = address;
-	tcm_reply_module = module_index;
-	tcm_reply_command_type = SWITCHTCMSTATUS;
-		
-	// reset tcm ptotocol analyzing buffer
-	tcm_reply_buf_length = 0;
-	
-	// enable analyzing frame
-	reply_frame_analyzing_flag = true;
+	tcmPrepareReply("CMD:REPLY=", address, module_index, SWITCHTCMSTATUS);
 }
 
 /*
@@ -459,23 +449,9 @@ void tcmStartupEnableTCMCommand(uint8_t channel_index) {
 		return;
 
 	tcm_command_buf_length = 0;
-
-  sprintf(tcm_command_buf, "TC%d:TCSW=1@%d%c", module_index, address, 0x0D);
-
+	sprintf(tcm_command_buf, "TC%d:TCSW=1@%d%c", module_index, address, 0x0D);
 	Serial5.write(tcm_command_buf, strlen(tcm_command_buf));
-
-  sprintf(tcm_reply_title, "CMD:REPLY=");
-
-	tcm_reply_title_length = strlen(tcm_reply_title);
-	tcm_reply_address = address;
-	tcm_reply_module = module_index;
-	tcm_reply_command_type = ENABLETCM;
-		
-	// reset tcm ptotocol analyzing buffer
-	tcm_reply_buf_length = 0;
-	
-	// enable analyzing frame
-	reply_frame_analyzing_flag = true;
+	tcmPrepareReply("CMD:REPLY=", address, module_index, ENABLETCM);
 }
 
 /*
@@ -499,24 +475,13 @@ void tcmQueryTemperatureCommand(uint8_t channel_index) {
 		sprintf(tcm_command_buf, "TC%d:TCACTUALTEMP?@%d%c", module_index, address, 0x0D);
 	}
 	Serial5.write(tcm_command_buf, strlen(tcm_command_buf));
-	
-	if (address == 2) {
-		sprintf(tcm_reply_title, "TC%d:TCACTTEMP=", module_index);
-	}
-	else {
-		sprintf(tcm_reply_title, "TC%d:TCACTUALTEMP=", module_index);
-	}
 
-	tcm_reply_title_length = strlen(tcm_reply_title);
-	tcm_reply_address = address;
-	tcm_reply_module = module_index;
-	tcm_reply_command_type = TEMPERATURE;
-		
-	// reset tcm ptotocol analyzing buffer
-	tcm_reply_buf_length = 0;
-	
-	// enable analyzing frame
-	reply_frame_analyzing_flag = true;
+	if (address == 2)
+		sprintf(tcm_reply_title, "TC%d:TCACTTEMP=", module_index);
+	else
+		sprintf(tcm_reply_title, "TC%d:TCACTUALTEMP=", module_index);
+
+	tcmPrepareReply(NULL, address, module_index, TEMPERATURE);
 }
 
 /*
@@ -529,22 +494,10 @@ void tcmQueryHiTempSetPointCommand(uint8_t channel_index) {
 		return;
 
 	tcm_command_buf_length = 0;
-
-  sprintf(tcm_command_buf, "TC%d:TCOTPHT?@%d%c", module_index, address, 0x0D);
+	sprintf(tcm_command_buf, "TC%d:TCOTPHT?@%d%c", module_index, address, 0x0D);
 	Serial5.write(tcm_command_buf, strlen(tcm_command_buf));
-
-  sprintf(tcm_reply_title, "TC%d:TCOTPHT=", module_index);
-
-	tcm_reply_title_length = strlen(tcm_reply_title);
-	tcm_reply_address = address;
-	tcm_reply_module = module_index;
-	tcm_reply_command_type = HITEMPSETPOINT;
-		
-	// reset tcm ptotocol analyzing buffer
-	tcm_reply_buf_length = 0;
-	
-	// enable analyzing frame
-	reply_frame_analyzing_flag = true;
+	sprintf(tcm_reply_title, "TC%d:TCOTPHT=", module_index);
+	tcmPrepareReply(NULL, address, module_index, HITEMPSETPOINT);
 }
 
 /*
@@ -569,23 +522,12 @@ void tcmQueryVoltageCommand(uint8_t channel_index) {
 	}
 	Serial5.write(tcm_command_buf, strlen(tcm_command_buf));
 
-	if (address == 2) {
+	if (address == 2)
 		sprintf(tcm_reply_title, "TC%d:TCACTVOL=", module_index);
-	}
-	else {
+	else
 		sprintf(tcm_reply_title, "TC%d:TCACTUALVOLTAGE=", module_index);
-	}
 
-	tcm_reply_title_length = strlen(tcm_reply_title);
-	tcm_reply_address = address;
-	tcm_reply_module = module_index;
-	tcm_reply_command_type = VOLTAGE;
-		
-	// reset tcm ptotocol analyzing buffer
-	tcm_reply_buf_length = 0;
-	
-	// enable analyzing frame
-	reply_frame_analyzing_flag = true;
+	tcmPrepareReply(NULL, address, module_index, VOLTAGE);
 }
 
 /*
@@ -607,17 +549,7 @@ void tcmQueryCurrentCommand(uint8_t channel_index) {
 	Serial5.write(tcm_command_buf, strlen(tcm_command_buf));
 
 	sprintf(tcm_reply_title, "TC%d:TCACTCUR=", module_index);
-
-	tcm_reply_title_length = strlen(tcm_reply_title);
-	tcm_reply_address = address;
-	tcm_reply_module = module_index;
-	tcm_reply_command_type = CURRENT;
-
-	// reset tcm ptotocol analyzing buffer
-	tcm_reply_buf_length = 0;
-
-	// enable analyzing frame
-	reply_frame_analyzing_flag = true;
+	tcmPrepareReply(NULL, address, module_index, CURRENT);
 }
 
 /*
@@ -643,23 +575,12 @@ void tcmQueryAdjustTempCommand(uint8_t channel_index) {
 
 	Serial5.write(tcm_command_buf, strlen(tcm_command_buf));
 
-	if (address == 2 || address == 5) {
+	if (address == 2 || address == 5)
 		sprintf(tcm_reply_title, "TC%d:TCADJTEMP=", module_index);
-	}
-	else {
+	else
 		sprintf(tcm_reply_title, "TC%d:TCADJUSTTEMP=", module_index);
-	}
 
-	tcm_reply_title_length = strlen(tcm_reply_title);
-	tcm_reply_address = address;
-	tcm_reply_module = module_index;
-	tcm_reply_command_type = ADJUSTTEMP;
-		
-	// reset tcm ptotocol analyzing buffer
-	tcm_reply_buf_length = 0;
-	
-	// enable analyzing frame
-	reply_frame_analyzing_flag = true;
+	tcmPrepareReply(NULL, address, module_index, ADJUSTTEMP);
 }
 
 /*
@@ -781,6 +702,11 @@ void sendChannelStatus(uint32_t channel) {
   uploadData(finalPacket, sizeof(finalPacket));
 }
 
+uint32_t readChannelFromBuffer(const uint8_t* buffer) {
+  return uint32_t(buffer[1]) | (uint32_t(buffer[2]) << 8) |
+         (uint32_t(buffer[3]) << 16) | (uint32_t(buffer[4]) << 24);
+}
+
 void onPacketReceived(const uint8_t* buffer, size_t size) {
   if (size < 5) return; // Minimum packet size (1 byte command + 4 bytes CRC)
 
@@ -800,10 +726,9 @@ void onPacketReceived(const uint8_t* buffer, size_t size) {
     case 'P': // Set parameters
       setParameters(buffer, size - 4);
       break;
-    case 'S': // put one channel to sleep 
+    case 'S': // Put one channel to sleep
       {
-        uint32_t channel;
-        channel = uint32_t(buffer[1] + (buffer[2]<<8) + (buffer[3]<<16) + (buffer[4]<<24));
+        uint32_t channel = readChannelFromBuffer(buffer);
         if (channel == 4) {
           doSleepAction(4);
           doSleepAction(5);
@@ -812,10 +737,9 @@ void onPacketReceived(const uint8_t* buffer, size_t size) {
           doSleepAction(channel);
       }
       break;
-    case 'W': // Reset device status 
+    case 'W': // Wake up channel
       {
-        uint32_t channel;
-        channel = uint32_t(buffer[1] + (buffer[2]<<8) + (buffer[3]<<16) + (buffer[4]<<24));
+        uint32_t channel = readChannelFromBuffer(buffer);
         if (channel == 4) {
           doWakeupAction(4);
           doWakeupAction(5);
@@ -826,8 +750,7 @@ void onPacketReceived(const uint8_t* buffer, size_t size) {
       break;
     case 'G': // Query channel status
       {
-        uint32_t channel;
-        channel = uint32_t(buffer[1] + (buffer[2]<<8) + (buffer[3]<<16) + (buffer[4]<<24));
+        uint32_t channel = readChannelFromBuffer(buffer);
         sendChannelStatus(channel);
       }
       break;
@@ -868,7 +791,7 @@ float convertChararrayToFloat(char * arrayValue, int valueLength) {
 	get information from one frame reply
 
 	return: true, the retvalue is the available value
-				false, the retvalue is the inavailable value
+				false, the retvalue is the unavailable value
  */
 bool analyzeValueFromTCMProtocol(float *retvalue) {
 	if (strncmp(tcm_reply_title, tcm_reply_buf, tcm_reply_title_length) == 0) {
@@ -999,7 +922,23 @@ void getAdjustTemperature() {
 }
 
 /*
-	analyzing TCM modules fram
+	Try to parse a TCM reply value and store it in the target array.
+	Returns the channel index on success, or ERR_OUT_OF_RANGE on failure.
+ */
+uint8_t tcmParseAndStore(float* targetArray) {
+	float tvalue = 0;
+	if (analyzeValueFromTCMProtocol(&tvalue)) {
+		uint8_t tindex = getChannelIndex(tcm_reply_address, tcm_reply_module);
+		if (tindex != ERR_OUT_OF_RANGE) {
+			targetArray[tindex] = tvalue;
+		}
+		return tindex;
+	}
+	return ERR_OUT_OF_RANGE;
+}
+
+/*
+	Analyze TCM modules frame
  */
 void analyzingTCMFrame() {
 	if (reply_frame_analyzing_flag) {
@@ -1010,62 +949,25 @@ void analyzingTCMFrame() {
 
 				switch (tcm_reply_command_type) {
 					case TEMPERATURE:
-						{
-							float tvalue = 0;
-							if (analyzeValueFromTCMProtocol(&tvalue)) {
-								uint8_t tindex = getChannelIndex(tcm_reply_address, tcm_reply_module);
-								if (tindex != ERR_OUT_OF_RANGE) {
-									tempCurrentPoints[tindex] = tvalue;
-								}
-							}
-						}
+						tcmParseAndStore(tempCurrentPoints);
 						break;
 					case VOLTAGE:
-						{
-							float tvalue = 0;
-							if (analyzeValueFromTCMProtocol(&tvalue)) {
-								uint8_t tindex = getChannelIndex(tcm_reply_address, tcm_reply_module);
-								if (tindex != ERR_OUT_OF_RANGE) {
-									voltageCurrentPoints[tindex] = tvalue;
-								}
-							}
-						}
+						tcmParseAndStore(voltageCurrentPoints);
 						break;
 					case CURRENT:
-						{
-							float tvalue = 0;
-							if (analyzeValueFromTCMProtocol(&tvalue)) {
-								uint8_t tindex = getChannelIndex(tcm_reply_address, tcm_reply_module);
-								if (tindex != ERR_OUT_OF_RANGE) {
-										currentCurrentPoints[tindex] = tvalue;
-								}
-							}
-						}
+						tcmParseAndStore(currentCurrentPoints);
 						break;
 					case HITEMPSETPOINT:
-						{
-							float tvalue = 0;
-							if (analyzeValueFromTCMProtocol(&tvalue)) {
-								uint8_t tindex = getChannelIndex(tcm_reply_address, tcm_reply_module);
-								if (tindex != ERR_OUT_OF_RANGE) {
-										highTempCurrentPoints[tindex] = tvalue;
-								}
-							}
-						}
+						tcmParseAndStore(highTempCurrentPoints);
 						break;
 					case ADJUSTTEMP:
 						{
-							float tvalue = 0;
-							if (analyzeValueFromTCMProtocol(&tvalue)) {
-								uint8_t tindex = getChannelIndex(tcm_reply_address, tcm_reply_module);
-								if (tindex != ERR_OUT_OF_RANGE) {
-										tempSetpoints[tindex] = tvalue;
-										getTempReady[tindex] = true;
-                    // only be successful could deal with next channel
-                    gQueryAdjustTempChannelIndex ++;
-                    if (gQueryAdjustTempChannelIndex == NUM_TEMP_CHANNELS)
-                      gQueryAdjustTempChannelIndex = 0;
-								}
+							uint8_t tindex = tcmParseAndStore(tempSetpoints);
+							if (tindex != ERR_OUT_OF_RANGE) {
+								getTempReady[tindex] = true;
+								gQueryAdjustTempChannelIndex++;
+								if (gQueryAdjustTempChannelIndex == NUM_TEMP_CHANNELS)
+									gQueryAdjustTempChannelIndex = 0;
 							}
 						}
 						break;
@@ -1152,28 +1054,7 @@ uint8_t getLaserStatus(int channel_index) {
 
 void setup() {
   Serial.begin(115200);
-	delayMicroseconds(100000);	
-
-	/*
-	char cmd;
-	while(1) {
-		if (Serial.available()) {
-			cmd = Serial.read();
-			cmd = 'R';
-			switch(cmd) {
-				case 'R':
-					goto Run;
-					break;
-			}
-		}
-	}
-	*/
-
-//Run:
-	/*
-  sprintf(gtmpbuf, "%s %s", gtitle, gversion);
-  Serial.println(gtmpbuf);
-	*/
+	delayMicroseconds(100000);
 
   // TCM104x module UART5
   Serial5.begin(57600);
@@ -1207,7 +1088,7 @@ void setup() {
 
   pinMode(Interlock_pin, INPUT);
 
-  // initialize the last lasert status change time
+  // initialize the last laser status change time
   for (int i = 0; i < NUM_LASER_CHANNELS; i++) {
     lastLaserStatusChangeTime[i] = millis();
   }
@@ -1243,7 +1124,7 @@ void doSleepAction(int i) {
 
 void doWakeupAction(int i) {
   // do not need enable laser immediately.
-  // when channel status enter ACTIVE, then anble laser
+  // when channel status enter ACTIVE, then enable laser
   //enableLaser(i);
   updateChannelStatus(i, WAKE_UP);
 
@@ -1349,7 +1230,7 @@ void loop() {
         }
         break;
       case WAKE_UP:
-        // do nothing, just wait for TCM be changed to anble status
+        // do nothing, just wait for TCM be changed to enable status
 				// then enter WARMING_UP status
         break;
       case PREPARE_SLEEP:
@@ -1359,7 +1240,7 @@ void loop() {
     }
 
     if (channelStates[i] == WARMING_UP || channelStates[i] == ACTIVE || channelStates[i] == ERROR) {
-      // the lasert Status is lower and kept the status over SLEEP_TIMEOUT, then be ready to SLEEP status
+      // the laser status is low and kept the status over SLEEP_TIMEOUT, then be ready to SLEEP status
       if (getLaserStatus(i) == 0 && (millis() - getLaserStatusChangeTime(i)) >= CHANNELS_SLEEP_TIMEOUT[i]) {
         doSleepAction(i);
       }
@@ -1376,31 +1257,6 @@ void loop() {
   // Gree: all channels are ACTIVE 
   // Blue: others 
   indicate_device_status();
-
-	/*
-  // code just for debug
-	if (Serial.available()) {
-		cmd = Serial.read();
-
-		switch (cmd) {
-			case 'N':
-				sendNAK();
-				break;
-			case 'A':
-				sendACK();
-				break;
-			case 'T':
-				break;
-			case 'R':
-				for (int i = 0; i < 6; i++) {
-					sprintf(gtmpbuf, "ch%d: %f", i, tempCurrentPoints[i]);
-  				Serial.println(gtmpbuf);
-				}
-				break;
-		}
-	}
-  // code just for debug
-	*/
 
 	// analyzing host frame
 	analyzingHostFrame();
