@@ -897,7 +897,8 @@ void analyzingHostFrame() {
 			return;
 		}
 		host_protocol_buf[host_protocol_buf_length++] = Serial.read();
-		if (host_protocol_buf[host_protocol_buf_length - 1] == 0x0D &&
+		if (host_protocol_buf_length >= 2 &&
+				host_protocol_buf[host_protocol_buf_length - 1] == 0x0D &&
 				host_protocol_buf[host_protocol_buf_length - 2] == 0x0A) {
 			onPacketReceived(host_protocol_buf, host_protocol_buf_length - 2);
 
@@ -972,6 +973,7 @@ void analyzingTCMFrame() {
 				Serial5.read(); // drain
 				tcm_reply_buf_length = 0;
 				reply_frame_analyzing_flag = false;
+				tcm_parse_failure_count++;
 				return;
 			}
 			tcm_reply_buf[tcm_reply_buf_length++] = Serial5.read();

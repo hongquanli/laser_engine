@@ -170,11 +170,11 @@ class TeensyController:
 
     def stop(self):
         self._running.clear()
-        self.packet_serial.close()
         if self.query_thread:
             self.query_thread.join()
         if self.thread_read_received_packet:
             self.thread_read_received_packet.join()
+        self.packet_serial.close()
 
     def run(self):
         try:
