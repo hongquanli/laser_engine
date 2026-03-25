@@ -142,7 +142,7 @@ class TestOnPacketReceived:
     def test_rejects_packet_shorter_than_4_bytes(self, controller_and_serial):
         ctrl, _ = controller_and_serial
         ctrl.on_packet_received(bytearray(b'\x00\x01\x02'))
-        # Should return without error (no crash)
+        assert ctrl.crc_mismatch == 0  # Rejected before CRC check
 
     def test_rejects_invalid_crc(self, controller_and_serial):
         ctrl, _ = controller_and_serial
@@ -157,17 +157,21 @@ class TestOnPacketReceived:
         ctrl.on_packet_received(bad_packet)
         assert ctrl.crc_mismatch == 2
 
-    def test_ack_packet_accepted(self, controller_and_serial):
+    @patch('builtins.print')
+    def test_ack_packet_accepted(self, mock_print, controller_and_serial):
         ctrl, _ = controller_and_serial
         packet = self._make_packet(b'A')
         ctrl.on_packet_received(packet)
         assert ctrl.crc_mismatch == 0
+        mock_print.assert_called_with("Parameters set successfully")
 
-    def test_nak_packet_accepted(self, controller_and_serial):
+    @patch('builtins.print')
+    def test_nak_packet_accepted(self, mock_print, controller_and_serial):
         ctrl, _ = controller_and_serial
         packet = self._make_packet(b'N')
         ctrl.on_packet_received(packet)
         assert ctrl.crc_mismatch == 0
+        mock_print.assert_called_with("Command not acknowledged")
 
     def test_status_packet_parsing(self, controller_and_serial):
         """Build a valid status packet and verify it parses without error."""
@@ -350,7 +354,8 @@ class TestStartStop:
         mock_serial.close = track_close
 
         ctrl.start()
-        time.sleep(0.1)
+        assert ctrl.query_thread.is_alive(), "query_thread should be running"
+        assert ctrl.thread_read_received_packet.is_alive(), "receive_thread should be running"
 
         # Patch join to track ordering
         original_join_q = ctrl.query_thread.join
