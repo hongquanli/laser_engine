@@ -9,9 +9,10 @@ build/
 # Logs
 *.log
 
-# IDE
+# IDE and tools
 .vscode/
 .idea/
+.claude/
 *.swp
 *.swo
 *~
