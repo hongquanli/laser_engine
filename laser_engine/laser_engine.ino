@@ -165,7 +165,7 @@ uint8_t gProcessChannelStatusIndex = 0;
 bool reply_frame_analyzing_flag = false;
 
 char tcm_command_buf[256];
-uint8_t tcm_command_buf_length = 0;
+uint16_t tcm_command_buf_length = 0;
 
 char tcm_reply_buf[256];
 uint16_t tcm_reply_buf_length = 0;

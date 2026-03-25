@@ -44,7 +44,7 @@ class TeensyController:
 
         self.lock = threading.RLock()
         self.query_interval = 1.0  # Query interval in seconds
-        self.running = False
+        self._running = threading.Event()
         self.query_thread = None
         self.thread_read_received_packet = None
 
@@ -126,20 +126,20 @@ class TeensyController:
             self.log_message(f"Channel {laser_channel}: " + str([bool(x) for x in laser_status]))
 
     def query_loop(self):
-        while self.running:
+        while self._running.is_set():
             try:
                 self.query_status()
             except serial.SerialException as e:
                 logging.error(f"Serial error in query loop: {e}")
-                self.running = False
+                self._running.clear()
                 break
-            except (OSError, ValueError) as e:
+            except (OSError, ValueError, struct.error) as e:
                 logging.error(f"Unexpected error in query loop: {e}")
             time.sleep(self.query_interval)
 
     def received_loop(self):
         msg = []
-        while self.running:
+        while self._running.is_set():
             try:
                 char = self.packet_serial.read(1)
                 if not char:
@@ -154,14 +154,14 @@ class TeensyController:
                 msg += char
             except serial.SerialException as e:
                 logging.error(f"Serial error in receive loop: {e}")
-                self.running = False
+                self._running.clear()
                 break
-            except (OSError, ValueError) as e:
+            except (OSError, ValueError, struct.error) as e:
                 logging.error(f"Error processing received data: {e}")
                 msg = []
 
     def start(self):
-        self.running = True
+        self._running.set()
         self.query_thread = threading.Thread(target=self.query_loop)
         self.query_thread.start()
 
@@ -169,7 +169,7 @@ class TeensyController:
         self.thread_read_received_packet.start()
 
     def stop(self):
-        self.running = False
+        self._running.clear()
         self.packet_serial.close()
         if self.query_thread:
             self.query_thread.join()
