@@ -133,7 +133,7 @@ class TeensyController:
                 logging.error(f"Serial error in query loop: {e}")
                 self.running = False
                 break
-            except Exception as e:
+            except (OSError, ValueError) as e:
                 logging.error(f"Unexpected error in query loop: {e}")
             time.sleep(self.query_interval)
 
@@ -141,10 +141,9 @@ class TeensyController:
         msg = []
         while self.running:
             try:
-                if self.packet_serial.in_waiting == 0:
-                    continue
-
                 char = self.packet_serial.read(1)
+                if not char:
+                    continue
                 if char == b'\r':
                     if msg and msg[-1] == 0x0A:
                         self.on_packet_received(bytearray(msg[:-1]))
@@ -157,7 +156,7 @@ class TeensyController:
                 logging.error(f"Serial error in receive loop: {e}")
                 self.running = False
                 break
-            except Exception as e:
+            except (OSError, ValueError) as e:
                 logging.error(f"Error processing received data: {e}")
                 msg = []
 

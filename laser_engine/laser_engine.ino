@@ -182,7 +182,7 @@ uint8_t host_protocol_buf[256];
 uint16_t host_protocol_buf_length = 0;
 
 uint8_t key_status = 0;
-uint16_t tcm_parse_failure_count = 0;
+uint32_t tcm_parse_failure_count = 0;
 
 enum LEDState {
   RED,
