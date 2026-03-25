@@ -189,18 +189,18 @@ class TeensyController:
             self.stop()
 
     def _send_packet(self, packet):
-        '''Send a packet with CRC and terminator. Must be called with self.lock held.'''
-        checksum = crc32(packet)
-        self.packet_serial.write(packet + struct.pack('<I', checksum))
-        self.packet_serial.write(b'\x0A\x0D')
+        '''Send a packet with CRC and terminator. Thread-safe.'''
+        with self.lock:
+            checksum = crc32(packet)
+            self.packet_serial.write(packet + struct.pack('<I', checksum))
+            self.packet_serial.write(b'\x0A\x0D')
 
     def query_status(self):
         '''
         API
         query all status information from firmware
         '''
-        with self.lock:
-            self._send_packet(b'Q')
+        self._send_packet(b'Q')
 
     def wake_up(self, channel):
         '''
@@ -208,8 +208,7 @@ class TeensyController:
         wake one channel from sleep status
         channel: 405, 470, 638, 735, 55x
         '''
-        with self.lock:
-            self._send_packet(b'W' + struct.pack('<I', self.mappings[channel]))
+        self._send_packet(b'W' + struct.pack('<I', self.mappings[channel]))
 
     def put_to_sleep(self, channel):
         '''
@@ -217,8 +216,7 @@ class TeensyController:
         make one channel into sleep
         channel: 405, 470, 638, 735, 55x
         '''
-        with self.lock:
-            self._send_packet(b'S' + struct.pack('<I', self.mappings[channel]))
+        self._send_packet(b'S' + struct.pack('<I', self.mappings[channel]))
 
     def get_laser_status(self, channel):
         '''
@@ -226,8 +224,7 @@ class TeensyController:
         get the channel status
         channel: 405, 470, 638, 735, 55x
         '''
-        with self.lock:
-            self._send_packet(b'G' + struct.pack('<I', self.mappings[channel]))
+        self._send_packet(b'G' + struct.pack('<I', self.mappings[channel]))
 
 
 if __name__ == "__main__":
