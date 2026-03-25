@@ -165,10 +165,10 @@ uint8_t gProcessChannelStatusIndex = 0;
 bool reply_frame_analyzing_flag = false;
 
 char tcm_command_buf[256];
-uint8_t tcm_command_buf_length = 0;
+uint16_t tcm_command_buf_length = 0;
 
 char tcm_reply_buf[256];
-uint8_t tcm_reply_buf_length = 0;
+uint16_t tcm_reply_buf_length = 0;
 
 // for judge whether the replay value is correct or not
 char tcm_reply_title[256];
@@ -179,9 +179,10 @@ CommandType tcm_reply_command_type = NONE;
 
 // host protocol process variables
 uint8_t host_protocol_buf[256];
-uint8_t host_protocol_buf_length = 0;
+uint16_t host_protocol_buf_length = 0;
 
-uint8_t key_status = 0; 
+uint8_t key_status = 0;
+uint32_t tcm_parse_failure_count = 0;
 
 enum LEDState {
   RED,
@@ -734,7 +735,12 @@ void onPacketReceived(const uint8_t* buffer, size_t size) {
       break;
     case 'S': // Put one channel to sleep
       {
+        if (size < 9) { sendNAK(); break; } // 1 cmd + 4 channel + 4 CRC
         uint32_t channel = readChannelFromBuffer(buffer);
+        if (channel >= NUM_LASER_CHANNELS) {
+          sendNAK();
+          break;
+        }
         if (channel == 4) {
           doSleepAction(4);
           doSleepAction(5);
@@ -745,7 +751,12 @@ void onPacketReceived(const uint8_t* buffer, size_t size) {
       break;
     case 'W': // Wake up channel
       {
+        if (size < 9) { sendNAK(); break; } // 1 cmd + 4 channel + 4 CRC
         uint32_t channel = readChannelFromBuffer(buffer);
+        if (channel >= NUM_LASER_CHANNELS) {
+          sendNAK();
+          break;
+        }
         if (channel == 4) {
           doWakeupAction(4);
           doWakeupAction(5);
@@ -756,7 +767,12 @@ void onPacketReceived(const uint8_t* buffer, size_t size) {
       break;
     case 'G': // Query channel status
       {
+        if (size < 9) { sendNAK(); break; } // 1 cmd + 4 channel + 4 CRC
         uint32_t channel = readChannelFromBuffer(buffer);
+        if (channel >= NUM_LASER_CHANNELS) {
+          sendNAK();
+          break;
+        }
         sendChannelStatus(channel);
       }
       break;
@@ -878,8 +894,14 @@ void queryTCMDataMainLoop() {
  */
 void analyzingHostFrame() {
 	if (Serial.available()) {
+		if (host_protocol_buf_length >= sizeof(host_protocol_buf)) {
+			Serial.read(); // drain the byte
+			host_protocol_buf_length = 0;
+			return;
+		}
 		host_protocol_buf[host_protocol_buf_length++] = Serial.read();
-		if (host_protocol_buf[host_protocol_buf_length - 1] == 0x0D &&
+		if (host_protocol_buf_length >= 2 &&
+				host_protocol_buf[host_protocol_buf_length - 1] == 0x0D &&
 				host_protocol_buf[host_protocol_buf_length - 2] == 0x0A) {
 			onPacketReceived(host_protocol_buf, host_protocol_buf_length - 2);
 
@@ -940,6 +962,7 @@ uint8_t tcmParseAndStore(float* targetArray) {
 		}
 		return tindex;
 	}
+	tcm_parse_failure_count++;
 	return ERR_OUT_OF_RANGE;
 }
 
@@ -949,6 +972,13 @@ uint8_t tcmParseAndStore(float* targetArray) {
 void analyzingTCMFrame() {
 	if (reply_frame_analyzing_flag) {
 		if (Serial5.available()) {
+			if (tcm_reply_buf_length >= sizeof(tcm_reply_buf)) {
+				Serial5.read(); // drain
+				tcm_reply_buf_length = 0;
+				reply_frame_analyzing_flag = false;
+				tcm_parse_failure_count++;
+				return;
+			}
 			tcm_reply_buf[tcm_reply_buf_length++] = Serial5.read();
 			// read the end flag of frame
 			if (tcm_reply_buf[tcm_reply_buf_length - 1] == 0x0D) {

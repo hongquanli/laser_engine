@@ -44,7 +44,7 @@ class TeensyController:
 
         self.lock = threading.RLock()
         self.query_interval = 1.0  # Query interval in seconds
-        self.running = False
+        self._running = threading.Event()
         self.query_thread = None
         self.thread_read_received_packet = None
 
@@ -99,7 +99,7 @@ class TeensyController:
                 tec_voltage = struct.unpack('>h', temp_data[offset + 3:offset + 5])[0] / 100.0
                 tec_current = struct.unpack('>h', temp_data[offset + 5:offset + 7])[0] / 100.0
 
-                state_str = STATE_NAMES[state]
+                state_str = STATE_NAMES[state] if state < len(STATE_NAMES) else f"UNKNOWN({state})"
                 self.log_message(f"Channel {i}: State: {state_str}, Temp: {temp:.2f}°C, TEC Voltage: {tec_voltage:.2f}, TEC Current: {tec_current:.2f}")
 
             diff_temp_offset = NUM_TEMP_CH * BYTES_PER_CHANNEL
@@ -126,25 +126,42 @@ class TeensyController:
             self.log_message(f"Channel {laser_channel}: " + str([bool(x) for x in laser_status]))
 
     def query_loop(self):
-        while self.running:
-            self.query_status()
+        while self._running.is_set():
+            try:
+                self.query_status()
+            except serial.SerialException as e:
+                logging.error(f"Serial error in query loop: {e}")
+                self._running.clear()
+                break
+            except (OSError, ValueError, struct.error) as e:
+                logging.error(f"Unexpected error in query loop: {e}")
             time.sleep(self.query_interval)
 
     def received_loop(self):
         msg = []
-        while self.running:
-            if self.packet_serial.in_waiting == 0:
-                continue
-
-            char = self.packet_serial.read(1)
-            if char == b'\r' and msg and msg[-1] == 0x0A:
-                self.on_packet_received(bytearray(msg[:-1]))
+        while self._running.is_set():
+            try:
+                char = self.packet_serial.read(1)
+                if not char:
+                    continue
+                if char == b'\r':
+                    if msg and msg[-1] == 0x0A:
+                        self.on_packet_received(bytearray(msg[:-1]))
+                    elif msg:
+                        logging.warning(f"Discarding {len(msg)} bytes of partial packet data")
+                    msg = []
+                    continue
+                msg += char
+            except serial.SerialException as e:
+                logging.error(f"Serial error in receive loop: {e}")
+                self._running.clear()
+                break
+            except (OSError, ValueError, struct.error) as e:
+                logging.error(f"Error processing received data: {e}")
                 msg = []
-                continue
-            msg += char
 
     def start(self):
-        self.running = True
+        self._running.set()
         self.query_thread = threading.Thread(target=self.query_loop)
         self.query_thread.start()
 
@@ -152,12 +169,12 @@ class TeensyController:
         self.thread_read_received_packet.start()
 
     def stop(self):
-        self.running = False
-        self.packet_serial.close()
+        self._running.clear()
         if self.query_thread:
             self.query_thread.join()
         if self.thread_read_received_packet:
             self.thread_read_received_packet.join()
+        self.packet_serial.close()
 
     def run(self):
         try:
@@ -171,18 +188,18 @@ class TeensyController:
             self.stop()
 
     def _send_packet(self, packet):
-        '''Send a packet with CRC and terminator. Must be called with self.lock held.'''
-        checksum = crc32(packet)
-        self.packet_serial.write(packet + struct.pack('<I', checksum))
-        self.packet_serial.write(b'\x0A\x0D')
+        '''Send a packet with CRC and terminator. Thread-safe.'''
+        with self.lock:
+            checksum = crc32(packet)
+            self.packet_serial.write(packet + struct.pack('<I', checksum))
+            self.packet_serial.write(b'\x0A\x0D')
 
     def query_status(self):
         '''
         API
         query all status information from firmware
         '''
-        with self.lock:
-            self._send_packet(b'Q')
+        self._send_packet(b'Q')
 
     def wake_up(self, channel):
         '''
@@ -190,8 +207,7 @@ class TeensyController:
         wake one channel from sleep status
         channel: 405, 470, 638, 735, 55x
         '''
-        with self.lock:
-            self._send_packet(b'W' + struct.pack('<I', self.mappings[channel]))
+        self._send_packet(b'W' + struct.pack('<I', self.mappings[channel]))
 
     def put_to_sleep(self, channel):
         '''
@@ -199,8 +215,7 @@ class TeensyController:
         make one channel into sleep
         channel: 405, 470, 638, 735, 55x
         '''
-        with self.lock:
-            self._send_packet(b'S' + struct.pack('<I', self.mappings[channel]))
+        self._send_packet(b'S' + struct.pack('<I', self.mappings[channel]))
 
     def get_laser_status(self, channel):
         '''
@@ -208,8 +223,7 @@ class TeensyController:
         get the channel status
         channel: 405, 470, 638, 735, 55x
         '''
-        with self.lock:
-            self._send_packet(b'G' + struct.pack('<I', self.mappings[channel]))
+        self._send_packet(b'G' + struct.pack('<I', self.mappings[channel]))
 
 
 if __name__ == "__main__":
