@@ -168,7 +168,7 @@ char tcm_command_buf[256];
 uint8_t tcm_command_buf_length = 0;
 
 char tcm_reply_buf[256];
-uint8_t tcm_reply_buf_length = 0;
+uint16_t tcm_reply_buf_length = 0;
 
 // for judge whether the replay value is correct or not
 char tcm_reply_title[256];
@@ -179,7 +179,7 @@ CommandType tcm_reply_command_type = NONE;
 
 // host protocol process variables
 uint8_t host_protocol_buf[256];
-uint8_t host_protocol_buf_length = 0;
+uint16_t host_protocol_buf_length = 0;
 
 uint8_t key_status = 0;
 uint16_t tcm_parse_failure_count = 0;
@@ -736,7 +736,7 @@ void onPacketReceived(const uint8_t* buffer, size_t size) {
     case 'S': // Put one channel to sleep
       {
         uint32_t channel = readChannelFromBuffer(buffer);
-        if (channel > NUM_LASER_CHANNELS) {
+        if (channel >= NUM_LASER_CHANNELS) {
           sendNAK();
           break;
         }
@@ -751,7 +751,7 @@ void onPacketReceived(const uint8_t* buffer, size_t size) {
     case 'W': // Wake up channel
       {
         uint32_t channel = readChannelFromBuffer(buffer);
-        if (channel > NUM_LASER_CHANNELS) {
+        if (channel >= NUM_LASER_CHANNELS) {
           sendNAK();
           break;
         }
