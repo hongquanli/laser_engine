@@ -33,6 +33,7 @@ jobs:
         env:
           ARDUINO_CLI_VERSION: "1.2.2"
         run: |
+          mkdir -p $PWD/bin
           curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR=$PWD/bin sh -s $ARDUINO_CLI_VERSION
           echo "$PWD/bin" >> $GITHUB_PATH
 
