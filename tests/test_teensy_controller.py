@@ -1,9 +1,9 @@
 """Tests for TeensyController packet handling, CRC validation, and framing logic."""
 
+import logging
 import struct
-import threading
 import time
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 from zlib import crc32
 
 import pytest
@@ -259,8 +259,8 @@ class TestReceivedLoopFraming:
         expected = bytearray(payload + checksum)
         assert received == expected
 
-    def test_stray_cr_discards_partial_data(self, controller_and_serial):
-        """A \r without preceding \n should discard accumulated data."""
+    def test_stray_cr_discards_partial_data(self, controller_and_serial, caplog):
+        """A \r without preceding \n should discard accumulated data with a warning."""
         ctrl, mock_serial = controller_and_serial
 
         # Send some garbage bytes then \r (without \n before it)
@@ -278,10 +278,12 @@ class TestReceivedLoopFraming:
         ctrl.on_packet_received = MagicMock()
 
         ctrl._running.set()
-        ctrl.received_loop()
+        with caplog.at_level(logging.WARNING):
+            ctrl.received_loop()
 
         # on_packet_received should NOT have been called
         assert not ctrl.on_packet_received.called
+        assert any("Discarding 3 bytes" in msg for msg in caplog.messages)
 
     def test_empty_cr_ignored(self, controller_and_serial):
         """A \r as the very first byte should not crash."""
