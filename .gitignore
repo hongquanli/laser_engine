@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Arduino build artifacts
+laser_engine/build/
+tcm_args_download/build/
+
+# pytest
+.pytest_cache/
+
+# Virtual environments
+venv/
+.venv/
