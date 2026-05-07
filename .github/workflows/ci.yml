@@ -16,7 +16,9 @@ jobs:
         with:
           python-version: "3.12"
           cache: "pip"
-          cache-dependency-path: requirements-dev.txt
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
@@ -34,16 +36,24 @@ jobs:
           ARDUINO_CLI_VERSION: "1.2.2"
         run: |
           mkdir -p $PWD/bin
-          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR=$PWD/bin sh -s $ARDUINO_CLI_VERSION
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/v${ARDUINO_CLI_VERSION}/install.sh | BINDIR=$PWD/bin sh -s $ARDUINO_CLI_VERSION
           echo "$PWD/bin" >> $GITHUB_PATH
+
+      - name: Cache Arduino core and libraries
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.arduino15
+            ~/Arduino/libraries
+          key: arduino-${{ runner.os }}-teensy-1.60.0-crc32-2.0.1-elapsedmillis-1.0.6
 
       - name: Install Teensy board package and libraries
         run: |
-          arduino-cli config init
+          arduino-cli config init --overwrite
           arduino-cli config add board_manager.additional_urls https://www.pjrc.com/teensy/package_teensy_index.json
           arduino-cli core update-index
-          arduino-cli core install teensy:avr
-          arduino-cli lib install "CRC32" "elapsedMillis"
+          arduino-cli core install teensy:avr@1.60.0
+          arduino-cli lib install "CRC32"@2.0.1 "elapsedMillis"@1.0.6
 
       - name: Compile laser_engine firmware
         run: arduino-cli compile -b teensy:avr:teensy41 ./laser_engine

@@ -30,7 +30,8 @@ arduino-cli lib install "CRC32" "elapsedMillis"
 # Compile
 arduino-cli compile -b teensy:avr:teensy41 ./laser_engine
 
-# Upload (adjust port as needed)
+# Upload — Teensy uses a USB hub path rather than a /dev node. Run
+# `arduino-cli board list` to find the port for your Teensy.
 arduino-cli upload -b teensy:avr:teensy41 ./laser_engine -p usb1/1-1
 ```
 
