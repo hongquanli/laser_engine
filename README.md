@@ -76,7 +76,3 @@ The system has two main components:
 | Blue   | At least one channel not ACTIVE  |
 | Red    | At least one channel in ERROR    |
 | Yellow | Interlock key is OFF             |
-
-## License
-
-MIT License
