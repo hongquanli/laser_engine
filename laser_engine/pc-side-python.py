@@ -38,9 +38,14 @@ class TeensyController:
                     ports.append(p.device)
         
         if not ports:
-            raise ValueError("No device found with serial number or device")
+            wanted = f"serial number {SN!r}" if SN is not None else f"device {device!r}"
+            attached = ", ".join(
+                f"{p.device} (SN {p.serial_number})" for p in list_ports.comports()
+            ) or "none"
+            raise ValueError(f"No device found with {wanted}. Attached ports: {attached}")
 
-        self.packet_serial = serial.Serial(ports[0], baudrate=baud_rate, timeout=1)
+        self.port = ports[0]
+        self.packet_serial = serial.Serial(self.port, baudrate=baud_rate, timeout=1)
 
         self.lock = threading.RLock()
         self.query_interval = 1.0  # Query interval in seconds
@@ -50,6 +55,14 @@ class TeensyController:
 
         self.crc_mismatch = 0
 
+        # Optional hook: called with the dict from parse_status_packet() every time
+        # a status packet arrives. Used by the GUI; None means terminal-only operation.
+        # Runs on the serial reader thread.
+        self.status_callback = None
+
+        # Wake/sleep targets. Firmware reports 6 thermal channels but exposes 5
+        # lines here: channel 4 is the 555nm NECSEL diode and channel 5 is its
+        # PPLN doubling-crystal oven, so '55x' addresses both.
         self.mappings = {
             '405': 0,
             '470': 1,
@@ -67,6 +80,45 @@ class TeensyController:
         logging.info(message)
         print(message)  # Optional: Print to console for real-time feedback
 
+    NUM_LASER_CH = 5
+    NUM_TEMP_CH = 6
+    BYTES_PER_CHANNEL = 7
+    STATE_NAMES = ["WARMING_UP", "CHECK_ACTIVE", "ACTIVE", "WAKE_UP", "SLEEP", "PREPARE_SLEEP", "CHECK_ERROR", "ERROR"]
+
+    def parse_status_packet(self, packet):
+        '''
+        Decode an 'S' status packet into a dict:
+
+            {'laser_ttl': [bool x5],
+             'channels': [{'state', 'state_str', 'temp', 'tec_voltage',
+                           'tec_current', 'diff_temp', 'hi_temp_setpoint'} x6]}
+
+        CRC is assumed already verified by the caller.
+        '''
+        laser_ttl = [bool(x) for x in packet[1:1 + self.NUM_LASER_CH]]
+        temp_data = packet[1 + self.NUM_LASER_CH:-4]
+        diff_temp_offset = self.NUM_TEMP_CH * self.BYTES_PER_CHANNEL
+        hi_temp_offset = diff_temp_offset + self.NUM_TEMP_CH * 2
+
+        def centi(offset):
+            return struct.unpack('>h', temp_data[offset:offset + 2])[0] / 100.0
+
+        channels = []
+        for i in range(self.NUM_TEMP_CH):
+            offset = i * self.BYTES_PER_CHANNEL
+            state = temp_data[offset]
+            channels.append({
+                'state': state,
+                'state_str': self.STATE_NAMES[state] if state < len(self.STATE_NAMES) else f"UNKNOWN({state})",
+                'temp': centi(offset + 1),
+                'tec_voltage': centi(offset + 3),
+                'tec_current': centi(offset + 5),
+                'diff_temp': centi(diff_temp_offset + i*2),
+                'hi_temp_setpoint': centi(hi_temp_offset + i*2),
+            })
+
+        return {'laser_ttl': laser_ttl, 'channels': channels}
+
     def on_packet_received(self, packet):
         if len(packet) < 4:
             return
@@ -80,40 +132,26 @@ class TeensyController:
             return
 
         if packet[0] == ord('S'):  # Status packet
-            NUM_LASER_CH = 5
-            NUM_TEMP_CH = 6
-            BYTES_PER_CHANNEL = 7
-            STATE_NAMES = ["WARMING_UP", "CHECK_ACTIVE", "ACTIVE", "WAKE_UP", "SLEEP", "PREPARE_SLEEP", "CHECK_ERROR", "ERROR"]
-
-            laser_status = packet[1:1 + NUM_LASER_CH]
-            temp_data = packet[1 + NUM_LASER_CH:-4]
+            status = self.parse_status_packet(packet)
 
             self.log_message('')
             self.log_message('New Round Query Data Start..')
-            self.log_message("Laser TTL Status:" + str([bool(x) for x in laser_status]))
+            self.log_message("Laser TTL Status:" + str(status['laser_ttl']))
 
-            for i in range(NUM_TEMP_CH):
-                offset = i * BYTES_PER_CHANNEL
-                state = temp_data[offset]
-                temp = struct.unpack('>h', temp_data[offset + 1:offset + 3])[0] / 100.0
-                tec_voltage = struct.unpack('>h', temp_data[offset + 3:offset + 5])[0] / 100.0
-                tec_current = struct.unpack('>h', temp_data[offset + 5:offset + 7])[0] / 100.0
+            for i, ch in enumerate(status['channels']):
+                self.log_message(f"Channel {i}: State: {ch['state_str']}, Temp: {ch['temp']:.2f}°C, TEC Voltage: {ch['tec_voltage']:.2f}, TEC Current: {ch['tec_current']:.2f}")
 
-                state_str = STATE_NAMES[state] if state < len(STATE_NAMES) else f"UNKNOWN({state})"
-                self.log_message(f"Channel {i}: State: {state_str}, Temp: {temp:.2f}°C, TEC Voltage: {tec_voltage:.2f}, TEC Current: {tec_current:.2f}")
+            for i, ch in enumerate(status['channels']):
+                self.log_message(f"Channel {i}: DiffTemp: {ch['diff_temp']:.2f}°C")
 
-            diff_temp_offset = NUM_TEMP_CH * BYTES_PER_CHANNEL
-            for i in range(NUM_TEMP_CH):
-                temp = struct.unpack('>h', temp_data[diff_temp_offset + i*2:diff_temp_offset + i*2 + 2])[0] / 100.0
-                self.log_message(f"Channel {i}: DiffTemp: {temp:.2f}°C")
-
-            hi_temp_offset = diff_temp_offset + NUM_TEMP_CH * 2
-            for i in range(NUM_TEMP_CH):
-                temp = struct.unpack('>h', temp_data[hi_temp_offset + i*2:hi_temp_offset + i*2 + 2])[0] / 100.0
-                self.log_message(f"Channel {i}: Hi-Temp SetPoint: {temp:.2f}°C")
+            for i, ch in enumerate(status['channels']):
+                self.log_message(f"Channel {i}: Hi-Temp SetPoint: {ch['hi_temp_setpoint']:.2f}°C")
 
             self.log_message(f"CRC mismatch times: {self.crc_mismatch}")
-        
+
+            if self.status_callback is not None:
+                self.status_callback(status)
+
         elif packet[0] == ord('A'):  # Acknowledgment packet
             print("Parameters set successfully")
         

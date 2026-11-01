@@ -225,6 +225,53 @@ class TestOnPacketReceived:
         # Should not raise IndexError
         ctrl.on_packet_received(packet)
 
+    def _status_payload(self):
+        """Status payload with distinct per-channel values."""
+        payload = b'S' + bytes([0, 1, 0, 0, 1])
+        for i in range(6):
+            payload += bytes([i]) + struct.pack('>hhh', 2500 + i, -10 * i, 100 + i)
+        for i in range(6):
+            payload += struct.pack('>h', -50 * i)
+        for i in range(6):
+            payload += struct.pack('>h', 3000 + 100 * i)
+        return payload
+
+    def test_parse_status_packet_values(self, controller_and_serial):
+        ctrl, _ = controller_and_serial
+        status = ctrl.parse_status_packet(self._make_packet(self._status_payload()))
+
+        assert status['laser_ttl'] == [False, True, False, False, True]
+        assert [ch['state_str'] for ch in status['channels']] == ctrl.STATE_NAMES[:6]
+        ch5 = status['channels'][5]
+        assert ch5['state'] == 5
+        assert ch5['temp'] == pytest.approx(25.05)
+        assert ch5['tec_voltage'] == pytest.approx(-0.50)
+        assert ch5['tec_current'] == pytest.approx(1.05)
+        assert ch5['diff_temp'] == pytest.approx(-2.50)
+        assert ch5['hi_temp_setpoint'] == pytest.approx(35.00)
+
+    def test_status_callback_receives_parsed_status(self, controller_and_serial):
+        ctrl, _ = controller_and_serial
+        received = []
+        ctrl.status_callback = received.append
+        packet = self._make_packet(self._status_payload())
+
+        ctrl.on_packet_received(packet)
+
+        assert received == [ctrl.parse_status_packet(packet)]
+
+    def test_status_callback_not_called_on_bad_crc(self, controller_and_serial):
+        ctrl, _ = controller_and_serial
+        received = []
+        ctrl.status_callback = received.append
+        packet = self._make_packet(self._status_payload())
+        packet[-1] ^= 0xFF
+
+        ctrl.on_packet_received(packet)
+
+        assert received == []
+        assert ctrl.crc_mismatch == 1
+
 
 class TestReceivedLoopFraming:
     """Tests for the received_loop byte framing logic."""
@@ -388,6 +435,18 @@ class TestInit:
             with pytest.raises(ValueError, match="No device found"):
                 mod.TeensyController(device='/dev/nonexistent')
 
+    def test_no_device_error_lists_attached_ports(self):
+        with patch('serial.tools.list_ports.comports') as mock_comports:
+            mock_port = MagicMock()
+            mock_port.device = '/dev/ttyACM1'
+            mock_port.serial_number = 'OTHER'
+            mock_comports.return_value = [mock_port]
+
+            from importlib import import_module
+            mod = import_module('pc-side-python')
+            with pytest.raises(ValueError, match=r"serial number 'ABC123'.*/dev/ttyACM1 \(SN OTHER\)"):
+                mod.TeensyController(SN='ABC123')
+
     def test_finds_device_by_serial_number(self):
         with patch('serial.tools.list_ports.comports') as mock_comports, \
              patch('serial.Serial') as mock_serial_cls:
@@ -401,6 +460,7 @@ class TestInit:
             mod = import_module('pc-side-python')
             ctrl = mod.TeensyController(SN='ABC123')
             mock_serial_cls.assert_called_with('/dev/ttyACM0', baudrate=115200, timeout=1)
+            assert ctrl.port == '/dev/ttyACM0'
 
     def test_finds_device_by_device_path(self):
         with patch('serial.tools.list_ports.comports') as mock_comports, \
