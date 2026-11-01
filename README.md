@@ -8,6 +8,7 @@ Firmware and Python client for a multi-channel laser engine system built on Teen
 laser_engine/          Teensy 4.1 firmware + Python host client
   laser_engine.ino     Main firmware (state machine, TCM protocol, host protocol)
   pc-side-python.py    Python client for controlling the laser engine over USB serial
+  pc-side-gui.py       Tkinter status panel with per-line Wake/Sleep buttons
   compile.sh           Compile firmware
   upload.sh            Flash firmware to Teensy
 tcm_args_download/     TCM parameter configuration tools
@@ -42,6 +43,9 @@ pip install -r requirements.txt
 
 # Edit DEVICE or USBSN in pc-side-python.py to match your setup, then:
 python laser_engine/pc-side-python.py
+
+# Or the GUI (same DEVICE/USBSN settings):
+python laser_engine/pc-side-gui.py
 ```
 
 ### Development
